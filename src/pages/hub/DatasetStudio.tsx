@@ -19,6 +19,21 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from 'react-markdown';
 
+type ProcessedItem = {
+  id: number;
+  type: "code" | "prompt";
+  title: string;
+  content: string;
+  lang: string;
+  time: string;
+  source: string;
+  tokens: number;
+  hash: string;
+  cleanedContent?: string;
+  changes?: string[];
+  qualityScore?: number;
+};
+
 const DatasetStudio = () => {
   const { selectedItems, removeItem, clearSelection } = useDataSelection();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -31,6 +46,12 @@ const DatasetStudio = () => {
   const [assistantMessages, setAssistantMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [userInput, setUserInput] = useState("");
   const [isAssistantLoading, setIsAssistantLoading] = useState(false);
+  
+  // Batch processing state
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(0);
+  const [processedItems, setProcessedItems] = useState<ProcessedItem[]>([]);
+  const [batchSummary, setBatchSummary] = useState<{ total: number; processed: number; avgQualityScore: number } | null>(null);
   
   // Preprocessing options
   const [options, setOptions] = useState({
@@ -90,10 +111,71 @@ const DatasetStudio = () => {
     setUserInput("");
   };
 
+  const runBatchAIProcessing = async () => {
+    if (selectedItems.length === 0) {
+      toast.error("No data to process", {
+        description: "Select items from Data Lake first."
+      });
+      return;
+    }
+
+    setIsBatchProcessing(true);
+    setBatchProgress(0);
+    setProcessedItems([]);
+    setBatchSummary(null);
+
+    // Simulate progress while waiting for AI
+    const progressInterval = setInterval(() => {
+      setBatchProgress(prev => Math.min(prev + 2, 90));
+    }, 200);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('batch-process', {
+        body: { 
+          items: selectedItems.map(item => ({
+            id: item.id,
+            type: item.type,
+            title: item.title,
+            content: item.content,
+            lang: item.lang,
+            time: item.time,
+            source: item.source,
+            tokens: item.tokens,
+            hash: item.hash
+          })),
+          options
+        }
+      });
+
+      clearInterval(progressInterval);
+      setBatchProgress(100);
+
+      if (error) throw error;
+
+      if (data?.success) {
+        setProcessedItems(data.items);
+        setBatchSummary(data.summary);
+        toast.success("Batch AI processing complete!", {
+          description: `${data.summary.processed} items cleaned. Avg quality: ${data.summary.avgQualityScore}%`
+        });
+      } else {
+        throw new Error(data?.error || 'Batch processing failed');
+      }
+    } catch (error) {
+      clearInterval(progressInterval);
+      console.error('Batch process error:', error);
+      toast.error('Batch processing failed', {
+        description: error instanceof Error ? error.message : 'Unknown error'
+      });
+    } finally {
+      setIsBatchProcessing(false);
+    }
+  };
+
   const runProcessing = () => {
     if (selectedItems.length === 0) {
-      toast.error("처리할 데이터가 없습니다", {
-        description: "Data Lake에서 데이터를 선택해주세요."
+      toast.error("No data to process", {
+        description: "Select items from Data Lake first."
       });
       return;
     }
@@ -107,8 +189,8 @@ const DatasetStudio = () => {
       if (p >= 100) {
         clearInterval(interval);
         setIsProcessing(false);
-        toast.success("데이터셋 처리 완료!", {
-          description: `${selectedItems.length}개 항목이 ${selectedFormat.toUpperCase()} 형식으로 변환되었습니다.`
+        toast.success("Dataset processing complete!", {
+          description: `${selectedItems.length} items converted to ${selectedFormat.toUpperCase()} format.`
         });
       }
     }, 100);
@@ -116,10 +198,31 @@ const DatasetStudio = () => {
 
   const handleExport = () => {
     if (selectedItems.length === 0) {
-      toast.error("내보낼 데이터가 없습니다");
+      toast.error("No data to export");
       return;
     }
-    toast.success("데이터셋 내보내기 시작", {
+
+    // Use processed items if available, otherwise use selected items
+    const itemsToExport = processedItems.length > 0 ? processedItems : selectedItems;
+    const exportData = itemsToExport.map((item, i) => ({
+      id: `train_${i}`,
+      messages: [
+        { role: "user", content: item.title },
+        { role: "assistant", content: 'cleanedContent' in item && item.cleanedContent ? item.cleanedContent : item.content }
+      ]
+    }));
+
+    const blob = new Blob([exportData.map(d => JSON.stringify(d)).join('\n')], { type: 'application/jsonl' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${datasetName}.${selectedFormat === 'jsonl' ? 'jsonl' : 'json'}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast.success("Dataset exported", {
       description: `${datasetName}.${selectedFormat === 'jsonl' ? 'jsonl' : 'json'}`
     });
   };
@@ -144,6 +247,12 @@ const DatasetStudio = () => {
           <Badge variant="outline" className="border-muted-foreground/50 text-muted-foreground font-mono">
             {totalTokens.toLocaleString()} Tokens
           </Badge>
+          {batchSummary && (
+            <Badge variant="outline" className="border-accent/50 text-accent bg-accent/10 font-mono">
+              <Check className="w-3 h-3 mr-1" />
+              AI Cleaned ({batchSummary.avgQualityScore}% quality)
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button 
@@ -163,6 +272,16 @@ const DatasetStudio = () => {
           >
             <Trash2 className="w-4 h-4 mr-2" />
             Clear All
+          </Button>
+          <Button 
+            size="sm" 
+            variant="outline"
+            className="border-accent/50 text-accent hover:bg-accent/10" 
+            onClick={runBatchAIProcessing} 
+            disabled={isBatchProcessing || selectedItems.length === 0}
+          >
+            {isBatchProcessing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
+            {isBatchProcessing ? "AI Cleaning..." : "AI Clean All"}
           </Button>
           <Button 
             size="sm" 
@@ -310,12 +429,27 @@ const DatasetStudio = () => {
               </div>
             )}
 
+            {isBatchProcessing && (
+              <div className="mb-4 space-y-2 animate-fade-in">
+                <div className="flex justify-between text-xs">
+                  <span className="text-accent font-space">AI cleaning {selectedItems.length} items...</span>
+                  <span className="text-accent font-mono font-bold">{batchProgress}%</span>
+                </div>
+                <Progress value={batchProgress} className="h-2 bg-accent/20" />
+              </div>
+            )}
+
             <div className="flex-1 bg-background/80 rounded-xl border border-border/50 p-4 font-mono text-xs overflow-auto custom-scrollbar">
               <div className="text-muted-foreground mb-4 flex items-center gap-2">
                 <span className="text-primary">//</span> Dataset Preview
                 <Badge variant="outline" className="ml-auto text-[10px] font-mono">
                   {selectedFormat.toUpperCase()}
                 </Badge>
+                {processedItems.length > 0 && (
+                  <Badge variant="outline" className="text-[10px] font-mono border-accent/50 text-accent bg-accent/10">
+                    AI Processed
+                  </Badge>
+                )}
               </div>
               
               {selectedItems.length === 0 ? (
@@ -323,6 +457,35 @@ const DatasetStudio = () => {
                   <FileJson className="w-12 h-12 mb-4 opacity-30" />
                   <p className="text-sm">No data to preview</p>
                 </div>
+              ) : processedItems.length > 0 ? (
+                // Show processed items with AI quality info
+                processedItems.slice(0, 5).map((item, i) => (
+                  <div key={item.id} className="mb-3 p-3 rounded-lg bg-card/60 border border-accent/30 text-[11px]">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-accent text-[10px] flex items-center gap-1">
+                        <Check className="w-3 h-3" /> AI Cleaned
+                      </span>
+                      <Badge variant="outline" className="text-[9px] border-accent/50 text-accent">
+                        Quality: {item.qualityScore}%
+                      </Badge>
+                    </div>
+                    <span className="text-primary">{`{`}</span>
+                    <div className="pl-3">
+                      <span className="text-neon-orange">"id"</span>: <span className="text-neon-green">"train_{i}"</span>,
+                      <br />
+                      <span className="text-neon-orange">"messages"</span>: [
+                      <span className="text-primary">{`{`}</span>"role": "user", "content": "{item.title}"<span className="text-primary">{`}`}</span>,
+                      <span className="text-primary">{`{`}</span>"role": "assistant", "content": "..."<span className="text-primary">{`}`}</span>]
+                    </div>
+                    <span className="text-primary">{`}`}</span>
+                    {item.changes && item.changes.length > 0 && (
+                      <div className="mt-2 text-[9px] text-muted-foreground">
+                        Changes: {item.changes.slice(0, 2).join(', ')}
+                        {item.changes.length > 2 && ` +${item.changes.length - 2} more`}
+                      </div>
+                    )}
+                  </div>
+                ))
               ) : (
                 selectedItems.slice(0, 5).map((item, i) => (
                   <div key={item.id} className="mb-3 p-3 rounded-lg bg-card/60 border border-border/30 text-[11px]">

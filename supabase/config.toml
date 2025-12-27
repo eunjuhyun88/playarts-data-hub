@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.dataset-assistant]
 verify_jwt = false
+
+[functions.batch-process]
+verify_jwt = false
