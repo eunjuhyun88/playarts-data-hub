@@ -24,14 +24,16 @@ import {
   Command as CommandIcon,
   LogOut,
   Zap,
+  BarChart3,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { DataSelectionProvider, useDataSelection } from "@/contexts/DataSelectionContext";
 import DataExplorer from "./hub/DataExplorer";
 import DatasetStudio from "./hub/DatasetStudio";
+import QualityDashboard from "./hub/QualityDashboard";
 
-type HubView = "explorer" | "studio" | "models" | "settings";
+type HubView = "explorer" | "studio" | "quality" | "models" | "settings";
 
 const HubContent = () => {
   const [currentView, setCurrentView] = useState<HubView>("explorer");
@@ -86,13 +88,24 @@ const HubContent = () => {
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton 
+                    isActive={currentView === "quality"} 
+                    onClick={() => setCurrentView("quality")}
+                    tooltip="Quality Dashboard"
+                    className="transition-all hover:bg-primary/10 data-[active=true]:bg-primary/15 data-[active=true]:text-primary data-[active=true]:border-l-2 data-[active=true]:border-primary"
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    <span className="font-space">3. Quality</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton 
                     isActive={currentView === "models"} 
                     onClick={() => setCurrentView("models")}
                     tooltip="Training Jobs"
                     className="transition-all hover:bg-primary/10 data-[active=true]:bg-primary/15 data-[active=true]:text-primary data-[active=true]:border-l-2 data-[active=true]:border-primary"
                   >
                     <BrainCircuit className="w-4 h-4" />
-                    <span className="font-space">3. Training</span>
+                    <span className="font-space">4. Training</span>
                     <Badge variant="outline" className="ml-auto text-[9px] px-1.5 py-0 border-accent/50 text-accent bg-accent/10">
                       SOON
                     </Badge>
@@ -169,12 +182,14 @@ const HubContent = () => {
               <h2 className="text-sm font-space font-medium text-foreground">
                 {currentView === "explorer" && "Data Lake"}
                 {currentView === "studio" && "Dataset Studio"}
+                {currentView === "quality" && "Quality Dashboard"}
                 {currentView === "models" && "Training Jobs"}
               </h2>
               <span className="text-muted-foreground/50">/</span>
               <span className="text-sm text-muted-foreground">
                 {currentView === "explorer" && "Select Data"}
                 {currentView === "studio" && "Process & Export"}
+                {currentView === "quality" && "Analytics & Metrics"}
                 {currentView === "models" && "Fine-tune"}
               </span>
             </div>
@@ -183,8 +198,10 @@ const HubContent = () => {
             {/* Workflow Progress Indicator */}
             <div className="flex items-center gap-1">
               <div className={`w-2.5 h-2.5 rounded-full transition-colors ${currentView === 'explorer' ? 'bg-primary shadow-[0_0_8px_hsl(var(--primary))]' : 'bg-primary/30'}`} />
-              <div className={`w-8 h-0.5 ${currentView === 'studio' || currentView === 'models' ? 'bg-primary' : 'bg-border'}`} />
+              <div className={`w-8 h-0.5 ${currentView === 'studio' || currentView === 'quality' || currentView === 'models' ? 'bg-primary' : 'bg-border'}`} />
               <div className={`w-2.5 h-2.5 rounded-full transition-colors ${currentView === 'studio' ? 'bg-primary shadow-[0_0_8px_hsl(var(--primary))]' : selectedItems.length > 0 ? 'bg-primary/50' : 'bg-border'}`} />
+              <div className={`w-8 h-0.5 ${currentView === 'quality' || currentView === 'models' ? 'bg-primary' : 'bg-border'}`} />
+              <div className={`w-2.5 h-2.5 rounded-full transition-colors ${currentView === 'quality' ? 'bg-primary shadow-[0_0_8px_hsl(var(--primary))]' : 'bg-border'}`} />
               <div className={`w-8 h-0.5 ${currentView === 'models' ? 'bg-primary' : 'bg-border'}`} />
               <div className={`w-2.5 h-2.5 rounded-full transition-colors ${currentView === 'models' ? 'bg-primary shadow-[0_0_8px_hsl(var(--primary))]' : 'bg-border'}`} />
             </div>
@@ -200,6 +217,7 @@ const HubContent = () => {
             <DataExplorer onNavigateToStudio={() => setCurrentView("studio")} />
           )}
           {currentView === "studio" && <DatasetStudio />}
+          {currentView === "quality" && <QualityDashboard />}
           {currentView === "models" && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-4">
