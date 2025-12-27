@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { 
   Command, 
   CommandInput, 
@@ -14,9 +15,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { AreaChart, Area } from 'recharts';
 import { ChartContainer } from "@/components/ui/chart";
-import { Code, FileText, Plus, TrendingUp, HardDrive, Layers } from "lucide-react";
+import { Code, FileText, Plus, TrendingUp, HardDrive, Layers, Check, ArrowRight, Trash2 } from "lucide-react";
+import { useDataSelection, DataItem } from "@/contexts/DataSelectionContext";
+import { toast } from "sonner";
 
 const chartData = [
   { name: 'Mon', code: 400, text: 240, image: 240 },
@@ -34,20 +38,76 @@ const chartConfig = {
   image: { label: "Image", color: "hsl(var(--neon-pink))" },
 };
 
-const mockDataItems = [
-  { id: 1, type: "code", title: "React Hook Authentication", content: "const useAuth = () => { const [user, setUser] = useState(null); useEffect(() => { ... ", lang: "TYPESCRIPT", time: "2 mins ago" },
-  { id: 2, type: "prompt", title: "Cyberpunk City Prompt", content: "A futuristic city with neon lights, rain pouring down, reflecting on the wet pavement...", lang: "PROMPT", time: "5 mins ago" },
-  { id: 3, type: "code", title: "Python Data Pipeline", content: "def process_data(df): return df.dropna().reset_index(drop=True).apply(lambda x: x.strip() if ...", lang: "PYTHON", time: "12 mins ago" },
-  { id: 4, type: "prompt", title: "API Documentation Gen", content: "Generate comprehensive API documentation for a REST endpoint that handles user authentication...", lang: "PROMPT", time: "18 mins ago" },
-  { id: 5, type: "code", title: "SQL Query Optimization", content: "SELECT u.id, u.name, COUNT(o.id) as order_count FROM users u LEFT JOIN orders o ON u.id = o.user_id...", lang: "SQL", time: "25 mins ago" },
-  { id: 6, type: "prompt", title: "Machine Learning Explanation", content: "Explain the concept of gradient descent in machine learning, focusing on how it optimizes...", lang: "PROMPT", time: "32 mins ago" },
-  { id: 7, type: "code", title: "Docker Compose Config", content: "version: '3.8' services: app: build: . ports: - '3000:3000' environment: - NODE_ENV=production...", lang: "YAML", time: "45 mins ago" },
-  { id: 8, type: "prompt", title: "Code Review Guidelines", content: "Review this code for potential performance issues, security vulnerabilities, and best practices...", lang: "PROMPT", time: "1 hour ago" },
+const mockDataItems: DataItem[] = [
+  { id: 1, type: "code", title: "React Hook Authentication", content: "const useAuth = () => { const [user, setUser] = useState(null); useEffect(() => { const session = supabase.auth.getSession(); setUser(session?.user); }, []); return { user, signIn, signOut }; }", lang: "TYPESCRIPT", time: "2 mins ago", source: "Claude 3.5 Sonnet", tokens: 1240, hash: "0x7f3a8b2c" },
+  { id: 2, type: "prompt", title: "Cyberpunk City Prompt", content: "A futuristic city with neon lights, rain pouring down, reflecting on the wet pavement. Flying cars zoom between towering skyscrapers covered in holographic advertisements.", lang: "PROMPT", time: "5 mins ago", source: "Midjourney v6", tokens: 892, hash: "0x9d2e4f1a" },
+  { id: 3, type: "code", title: "Python Data Pipeline", content: "def process_data(df): return df.dropna().reset_index(drop=True).apply(lambda x: x.strip() if isinstance(x, str) else x)", lang: "PYTHON", time: "12 mins ago", source: "GPT-4o", tokens: 567, hash: "0x3c8b7d4e" },
+  { id: 4, type: "prompt", title: "API Documentation Gen", content: "Generate comprehensive API documentation for a REST endpoint that handles user authentication with JWT tokens, including request/response schemas.", lang: "PROMPT", time: "18 mins ago", source: "Claude 3.5 Sonnet", tokens: 1456, hash: "0x5a1f9c3b" },
+  { id: 5, type: "code", title: "SQL Query Optimization", content: "SELECT u.id, u.name, COUNT(o.id) as order_count FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id HAVING COUNT(o.id) > 5 ORDER BY order_count DESC", lang: "SQL", time: "25 mins ago", source: "GPT-4o", tokens: 423, hash: "0x2b7c6e8d" },
+  { id: 6, type: "prompt", title: "Machine Learning Explanation", content: "Explain the concept of gradient descent in machine learning, focusing on how it optimizes neural network weights through backpropagation.", lang: "PROMPT", time: "32 mins ago", source: "Claude 3 Opus", tokens: 2103, hash: "0x8f4a2d1c" },
+  { id: 7, type: "code", title: "Docker Compose Config", content: "version: '3.8'\nservices:\n  app:\n    build: .\n    ports:\n      - '3000:3000'\n    environment:\n      - NODE_ENV=production\n    depends_on:\n      - db", lang: "YAML", time: "45 mins ago", source: "GPT-4o", tokens: 678, hash: "0x1e5d9a7f" },
+  { id: 8, type: "prompt", title: "Code Review Guidelines", content: "Review this code for potential performance issues, security vulnerabilities, and best practices. Focus on memory leaks and SQL injection risks.", lang: "PROMPT", time: "1 hour ago", source: "Claude 3.5 Sonnet", tokens: 934, hash: "0x6c3b8e2a" },
 ];
 
-const DataExplorer = () => {
+type DataExplorerProps = {
+  onNavigateToStudio: () => void;
+};
+
+const DataExplorer = ({ onNavigateToStudio }: DataExplorerProps) => {
+  const { selectedItems, isSelected, toggleSelection, clearSelection } = useDataSelection();
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredItems = mockDataItems.filter(item => 
+    item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.lang.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const handleProceedToStudio = () => {
+    if (selectedItems.length === 0) {
+      toast.error("선택된 데이터가 없습니다", {
+        description: "최소 1개 이상의 데이터를 선택해주세요."
+      });
+      return;
+    }
+    toast.success(`${selectedItems.length}개 항목이 Studio로 전송됩니다`);
+    onNavigateToStudio();
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Selection Bar - Shows when items are selected */}
+      {selectedItems.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-slide-in">
+          <div className="flex items-center gap-4 px-6 py-3 rounded-full bg-primary/95 text-primary-foreground shadow-neon backdrop-blur-sm border border-primary/50">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-primary-foreground/20 flex items-center justify-center font-bold font-mono">
+                {selectedItems.length}
+              </div>
+              <span className="font-space font-medium">items selected</span>
+            </div>
+            <div className="w-px h-6 bg-primary-foreground/30" />
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={clearSelection}
+              className="text-primary-foreground/80 hover:text-primary-foreground hover:bg-primary-foreground/10"
+            >
+              <Trash2 className="w-4 h-4 mr-1" />
+              Clear
+            </Button>
+            <Button 
+              size="sm" 
+              onClick={handleProceedToStudio}
+              className="bg-primary-foreground text-primary hover:bg-primary-foreground/90 font-bold"
+            >
+              Process in Studio
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Top Stats Area */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="glass-panel border-primary/30 shadow-neon-sm">
@@ -121,73 +181,111 @@ const DataExplorer = () => {
 
       {/* Main Search & Grid */}
       <Card className="glass-panel border-border/50 flex-1 min-h-[500px] flex flex-col">
-        <div className="p-4 border-b border-border/50">
-          <Command className="rounded-lg border border-border/50 shadow-lg bg-background/80 backdrop-blur-sm">
+        <div className="p-4 border-b border-border/50 flex items-center gap-4">
+          <Command className="flex-1 rounded-lg border border-border/50 shadow-lg bg-background/80 backdrop-blur-sm">
             <CommandInput 
               placeholder="Search code snippets, prompts, or images..." 
               className="h-12 font-space"
+              value={searchQuery}
+              onValueChange={setSearchQuery}
             />
             <CommandList className="hidden">
               <CommandEmpty>No results found.</CommandEmpty>
             </CommandList>
           </Command>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="font-mono">{filteredItems.length}</span>
+            <span>results</span>
+          </div>
         </div>
 
         <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 custom-scrollbar overflow-auto">
-          {mockDataItems.map((item) => (
-            <HoverCard key={item.id} openDelay={200}>
-              <HoverCardTrigger asChild>
-                <div className="group relative rounded-xl border border-border/50 bg-card/80 p-4 hover:border-primary/50 transition-all duration-300 cursor-pointer hover:shadow-neon-sm hover:-translate-y-1">
-                  <div className="flex justify-between items-start mb-3">
-                    <div className={`p-2 rounded-lg ${item.type === 'code' ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'}`}>
-                      {item.type === 'code' ? <Code className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+          {filteredItems.map((item) => {
+            const selected = isSelected(item.id);
+            return (
+              <HoverCard key={item.id} openDelay={300}>
+                <HoverCardTrigger asChild>
+                  <div 
+                    onClick={() => toggleSelection(item)}
+                    className={`group relative rounded-xl border p-4 transition-all duration-300 cursor-pointer hover:-translate-y-1 ${
+                      selected 
+                        ? 'border-primary bg-primary/10 shadow-neon-sm' 
+                        : 'border-border/50 bg-card/80 hover:border-primary/50 hover:shadow-neon-sm'
+                    }`}
+                  >
+                    {/* Selection Checkbox */}
+                    <div className={`absolute top-3 right-3 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                      <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
+                        selected 
+                          ? 'bg-primary border-primary' 
+                          : 'border-muted-foreground/50 group-hover:border-primary/50'
+                      }`}>
+                        {selected && <Check className="w-3 h-3 text-primary-foreground" />}
+                      </div>
                     </div>
-                    <Badge 
-                      variant="outline" 
-                      className={`text-[10px] font-mono ${item.type === 'code' ? 'border-primary/50 text-primary' : 'border-accent/50 text-accent'}`}
-                    >
-                      {item.lang}
-                    </Badge>
+
+                    <div className="flex justify-between items-start mb-3 pr-6">
+                      <div className={`p-2 rounded-lg ${item.type === 'code' ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'}`}>
+                        {item.type === 'code' ? <Code className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                      </div>
+                      <Badge 
+                        variant="outline" 
+                        className={`text-[10px] font-mono ${item.type === 'code' ? 'border-primary/50 text-primary' : 'border-accent/50 text-accent'}`}
+                      >
+                        {item.lang}
+                      </Badge>
+                    </div>
+                    <div className="space-y-2">
+                      <h3 className="font-semibold text-sm line-clamp-1 font-space">
+                        {item.title}
+                      </h3>
+                      <p className="text-xs text-muted-foreground line-clamp-3 font-mono bg-secondary/50 p-2 rounded-md border border-border/30">
+                        {item.content}
+                      </p>
+                    </div>
+                    <div className="mt-4 flex justify-between items-center">
+                      <span className="text-[10px] text-muted-foreground">{item.time}</span>
+                      <span className="text-[10px] text-muted-foreground font-mono">{item.tokens} tokens</span>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <h3 className="font-semibold text-sm line-clamp-1 font-space">
-                      {item.title}
-                    </h3>
-                    <p className="text-xs text-muted-foreground line-clamp-3 font-mono bg-secondary/50 p-2 rounded-md border border-border/30">
-                      {item.content}
-                    </p>
+                </HoverCardTrigger>
+                <HoverCardContent className="w-80 glass-panel border-primary/30" side="right">
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold font-space text-primary">Asset Details</h4>
+                    <div className="space-y-2 text-xs text-muted-foreground">
+                      <div className="flex justify-between">
+                        <span>Source</span>
+                        <span className="text-foreground">{item.source}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Tokens</span>
+                        <span className="text-foreground font-mono">{item.tokens.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Hash</span>
+                        <span className="text-primary font-mono">{item.hash}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 pt-2 border-t border-border/50">
+                      <Button size="sm" variant="outline" className="flex-1 text-xs h-7">
+                        Preview
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        className={`flex-1 text-xs h-7 ${selected ? 'bg-destructive hover:bg-destructive/90' : 'bg-primary/90 hover:bg-primary'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSelection(item);
+                        }}
+                      >
+                        {selected ? 'Remove' : 'Select'}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="mt-4 flex justify-between items-center">
-                    <span className="text-[10px] text-muted-foreground">{item.time}</span>
-                    <Button size="icon" variant="ghost" className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-primary/10 hover:text-primary">
-                      <Plus className="w-3 h-3" />
-                    </Button>
-                  </div>
-                </div>
-              </HoverCardTrigger>
-              <HoverCardContent className="w-80 glass-panel border-primary/30" side="right">
-                <div className="space-y-3">
-                  <h4 className="text-sm font-semibold font-space text-primary">Asset Details</h4>
-                  <div className="space-y-2 text-xs text-muted-foreground">
-                    <p>Captured from <span className="text-foreground">Claude 3.5 Sonnet</span></p>
-                    <p>Contains <span className="text-foreground font-mono">1,240 tokens</span></p>
-                  </div>
-                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                    <span className="text-xs text-muted-foreground">Hash</span>
-                    <span className="text-xs font-mono text-primary">0x7f3...8a2</span>
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    <Button size="sm" variant="outline" className="flex-1 text-xs h-7">
-                      Preview
-                    </Button>
-                    <Button size="sm" className="flex-1 text-xs h-7 bg-primary/90 hover:bg-primary">
-                      Add to Dataset
-                    </Button>
-                  </div>
-                </div>
-              </HoverCardContent>
-            </HoverCard>
-          ))}
+                </HoverCardContent>
+              </HoverCard>
+            );
+          })}
         </div>
       </Card>
     </div>
