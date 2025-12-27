@@ -1,1 +1,7 @@
 project_id = "hgbubfhxuzayickvfjfr"
+
+[functions.classify-data]
+verify_jwt = false
+
+[functions.dataset-assistant]
+verify_jwt = false

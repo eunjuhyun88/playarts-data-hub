@@ -15,12 +15,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { AreaChart, Area } from 'recharts';
 import { ChartContainer } from "@/components/ui/chart";
-import { Code, FileText, Plus, TrendingUp, HardDrive, Layers, Check, ArrowRight, Trash2 } from "lucide-react";
+import { Code, FileText, Plus, TrendingUp, HardDrive, Layers, Check, ArrowRight, Trash2, Sparkles, Loader2, Star } from "lucide-react";
 import { useDataSelection, DataItem } from "@/contexts/DataSelectionContext";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 const chartData = [
   { name: 'Mon', code: 400, text: 240, image: 240 },
@@ -38,7 +38,22 @@ const chartConfig = {
   image: { label: "Image", color: "hsl(var(--neon-pink))" },
 };
 
-const mockDataItems: DataItem[] = [
+type Classification = {
+  category: string;
+  qualityScore: number;
+  tags: string[];
+  summary: string;
+  language?: string;
+  domain?: string;
+  complexity?: string;
+};
+
+type ClassifiedItem = DataItem & {
+  classification?: Classification;
+  isClassifying?: boolean;
+};
+
+const mockDataItems: ClassifiedItem[] = [
   { id: 1, type: "code", title: "React Hook Authentication", content: "const useAuth = () => { const [user, setUser] = useState(null); useEffect(() => { const session = supabase.auth.getSession(); setUser(session?.user); }, []); return { user, signIn, signOut }; }", lang: "TYPESCRIPT", time: "2 mins ago", source: "Claude 3.5 Sonnet", tokens: 1240, hash: "0x7f3a8b2c" },
   { id: 2, type: "prompt", title: "Cyberpunk City Prompt", content: "A futuristic city with neon lights, rain pouring down, reflecting on the wet pavement. Flying cars zoom between towering skyscrapers covered in holographic advertisements.", lang: "PROMPT", time: "5 mins ago", source: "Midjourney v6", tokens: 892, hash: "0x9d2e4f1a" },
   { id: 3, type: "code", title: "Python Data Pipeline", content: "def process_data(df): return df.dropna().reset_index(drop=True).apply(lambda x: x.strip() if isinstance(x, str) else x)", lang: "PYTHON", time: "12 mins ago", source: "GPT-4o", tokens: 567, hash: "0x3c8b7d4e" },
@@ -54,14 +69,64 @@ type DataExplorerProps = {
 };
 
 const DataExplorer = ({ onNavigateToStudio }: DataExplorerProps) => {
-  const { selectedItems, isSelected, toggleSelection, clearSelection } = useDataSelection();
+  const { selectedItems, isSelected, toggleSelection, clearSelection, addItem } = useDataSelection();
   const [searchQuery, setSearchQuery] = useState("");
+  const [dataItems, setDataItems] = useState<ClassifiedItem[]>(mockDataItems);
+  const [classifyingAll, setClassifyingAll] = useState(false);
 
-  const filteredItems = mockDataItems.filter(item => 
+  const filteredItems = dataItems.filter(item => 
     item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.lang.toLowerCase().includes(searchQuery.toLowerCase())
+    item.lang.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.classification?.tags?.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
   );
+
+  const classifyItem = async (item: ClassifiedItem) => {
+    setDataItems(prev => prev.map(i => 
+      i.id === item.id ? { ...i, isClassifying: true } : i
+    ));
+
+    try {
+      const { data, error } = await supabase.functions.invoke('classify-data', {
+        body: { content: item.content, type: item.type }
+      });
+
+      if (error) throw error;
+
+      if (data?.success && data?.classification) {
+        setDataItems(prev => prev.map(i => 
+          i.id === item.id ? { ...i, classification: data.classification, isClassifying: false } : i
+        ));
+        toast.success(`Classified: ${item.title}`, {
+          description: `Quality: ${data.classification.qualityScore}/10`
+        });
+      } else {
+        throw new Error(data?.error || 'Classification failed');
+      }
+    } catch (error) {
+      console.error('Classification error:', error);
+      setDataItems(prev => prev.map(i => 
+        i.id === item.id ? { ...i, isClassifying: false } : i
+      ));
+      toast.error('Classification failed', {
+        description: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  };
+
+  const classifyAllItems = async () => {
+    setClassifyingAll(true);
+    const unclassified = dataItems.filter(item => !item.classification);
+    
+    for (const item of unclassified) {
+      await classifyItem(item);
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    setClassifyingAll(false);
+    toast.success('All items classified!');
+  };
 
   const handleProceedToStudio = () => {
     if (selectedItems.length === 0) {
@@ -74,9 +139,15 @@ const DataExplorer = ({ onNavigateToStudio }: DataExplorerProps) => {
     onNavigateToStudio();
   };
 
+  const getQualityColor = (score: number) => {
+    if (score >= 8) return 'text-neon-green';
+    if (score >= 5) return 'text-neon-orange';
+    return 'text-destructive';
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Selection Bar - Shows when items are selected */}
+      {/* Selection Bar */}
       {selectedItems.length > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-slide-in">
           <div className="flex items-center gap-4 px-6 py-3 rounded-full bg-primary/95 text-primary-foreground shadow-neon backdrop-blur-sm border border-primary/50">
@@ -184,7 +255,7 @@ const DataExplorer = ({ onNavigateToStudio }: DataExplorerProps) => {
         <div className="p-4 border-b border-border/50 flex items-center gap-4">
           <Command className="flex-1 rounded-lg border border-border/50 shadow-lg bg-background/80 backdrop-blur-sm">
             <CommandInput 
-              placeholder="Search code snippets, prompts, or images..." 
+              placeholder="Search by title, content, or AI tags..." 
               className="h-12 font-space"
               value={searchQuery}
               onValueChange={setSearchQuery}
@@ -193,6 +264,18 @@ const DataExplorer = ({ onNavigateToStudio }: DataExplorerProps) => {
               <CommandEmpty>No results found.</CommandEmpty>
             </CommandList>
           </Command>
+          <Button 
+            onClick={classifyAllItems} 
+            disabled={classifyingAll}
+            className="bg-accent/90 hover:bg-accent text-accent-foreground shadow-neon-accent"
+          >
+            {classifyingAll ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4 mr-2" />
+            )}
+            {classifyingAll ? 'Classifying...' : 'AI Classify All'}
+          </Button>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span className="font-mono">{filteredItems.length}</span>
             <span>results</span>
@@ -213,6 +296,16 @@ const DataExplorer = ({ onNavigateToStudio }: DataExplorerProps) => {
                         : 'border-border/50 bg-card/80 hover:border-primary/50 hover:shadow-neon-sm'
                     }`}
                   >
+                    {/* Classification Loading */}
+                    {item.isClassifying && (
+                      <div className="absolute inset-0 bg-background/80 backdrop-blur-sm rounded-xl flex items-center justify-center z-10">
+                        <div className="flex items-center gap-2 text-primary">
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <span className="text-xs font-space">Classifying...</span>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Selection Checkbox */}
                     <div className={`absolute top-3 right-3 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                       <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
@@ -224,7 +317,17 @@ const DataExplorer = ({ onNavigateToStudio }: DataExplorerProps) => {
                       </div>
                     </div>
 
-                    <div className="flex justify-between items-start mb-3 pr-6">
+                    {/* Quality Score Badge */}
+                    {item.classification && (
+                      <div className="absolute top-3 left-3">
+                        <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full bg-background/80 border border-border/50 ${getQualityColor(item.classification.qualityScore)}`}>
+                          <Star className="w-3 h-3 fill-current" />
+                          <span className="text-[10px] font-mono font-bold">{item.classification.qualityScore}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-start mb-3 pr-6 pt-6">
                       <div className={`p-2 rounded-lg ${item.type === 'code' ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'}`}>
                         {item.type === 'code' ? <Code className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
                       </div>
@@ -239,13 +342,41 @@ const DataExplorer = ({ onNavigateToStudio }: DataExplorerProps) => {
                       <h3 className="font-semibold text-sm line-clamp-1 font-space">
                         {item.title}
                       </h3>
-                      <p className="text-xs text-muted-foreground line-clamp-3 font-mono bg-secondary/50 p-2 rounded-md border border-border/30">
-                        {item.content}
+                      <p className="text-xs text-muted-foreground line-clamp-2 font-mono bg-secondary/50 p-2 rounded-md border border-border/30">
+                        {item.classification?.summary || item.content}
                       </p>
                     </div>
-                    <div className="mt-4 flex justify-between items-center">
+
+                    {/* AI Tags */}
+                    {item.classification?.tags && (
+                      <div className="mt-3 flex flex-wrap gap-1">
+                        {item.classification.tags.slice(0, 3).map((tag, idx) => (
+                          <Badge 
+                            key={idx} 
+                            variant="secondary" 
+                            className="text-[9px] px-1.5 py-0 bg-accent/10 text-accent border-accent/30"
+                          >
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="mt-3 flex justify-between items-center">
                       <span className="text-[10px] text-muted-foreground">{item.time}</span>
-                      <span className="text-[10px] text-muted-foreground font-mono">{item.tokens} tokens</span>
+                      {!item.classification && (
+                        <Button 
+                          size="icon" 
+                          variant="ghost" 
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-accent/10 hover:text-accent"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            classifyItem(item);
+                          }}
+                        >
+                          <Sparkles className="w-3 h-3" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </HoverCardTrigger>
@@ -261,6 +392,20 @@ const DataExplorer = ({ onNavigateToStudio }: DataExplorerProps) => {
                         <span>Tokens</span>
                         <span className="text-foreground font-mono">{item.tokens.toLocaleString()}</span>
                       </div>
+                      {item.classification && (
+                        <>
+                          <div className="flex justify-between">
+                            <span>Category</span>
+                            <span className="text-foreground">{item.classification.category}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Quality</span>
+                            <span className={`font-bold ${getQualityColor(item.classification.qualityScore)}`}>
+                              {item.classification.qualityScore}/10
+                            </span>
+                          </div>
+                        </>
+                      )}
                       <div className="flex justify-between">
                         <span>Hash</span>
                         <span className="text-primary font-mono">{item.hash}</span>
